@@ -1,0 +1,8 @@
+# opencode tooling (local only)
+.agents/
+skills-lock.json
+
+# dev artifacts / local runtime
+.playwright-mcp/
+.server.pid
+*.log

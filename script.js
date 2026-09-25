@@ -1,76 +1,13 @@
 /*
-  Shared motion helpers
+  Shared motion helpers.
+  In-page anchor navigation runs through a single eased
+  scroll system defined below, which also moves focus,
+  so no second handler may drive the same jump.
 */
-
-function scrollBehavior() {
-  return window.matchMedia("(prefers-reduced-motion: reduce)")
-    .matches
-    ? "auto"
-    : "smooth";
-}
 
 const prefersReducedMotion = window.matchMedia(
   "(prefers-reduced-motion: reduce)"
 );
-
-
-/*
-  Smooth, focus-preserving in-page navigation.
-  Moves focus to the target so keyboard users
-  continue from the section they jumped to.
-*/
-
-function goToSection(target) {
-  if (!target) return false;
-
-  target.setAttribute("tabindex", "-1");
-  target.scrollIntoView({ behavior: scrollBehavior() });
-  target.focus({ preventScroll: true });
-
-  return true;
-}
-
-
-const aboutButton =
-  document.querySelector(".hero-about-btn");
-
-
-if (aboutButton) {
-
-  aboutButton.addEventListener(
-    "click",
-    function(event) {
-
-      if (goToSection(document.querySelector("#about"))) {
-        event.preventDefault();
-      }
-
-    }
-
-  );
-
-}
-
-
-const viewAllButton =
-  document.querySelector(".view-all");
-
-
-if (viewAllButton) {
-
-  viewAllButton.addEventListener(
-    "click",
-    function(event) {
-
-      if (goToSection(document.querySelector("#all-projects"))) {
-        event.preventDefault();
-      }
-
-    }
-
-  );
-
-}
 
 
 /*
@@ -176,39 +113,84 @@ if (portrait) {
 
 
 /*
-  Fixed nav gains weight once the page moves,
-  so brand + links stay legible over dark sections.
+  Fixed nav gains weight once the page moves.
+  IntersectionObserver on a top sentinel, no scroll listeners.
 */
 
 (function initNavState() {
 
   const nav = document.querySelector(".hero-nav");
+  const sentinel = document.getElementById("topSentinel");
 
   if (!nav) return;
+  if (!sentinel || !("IntersectionObserver" in window)) {
+    nav.classList.toggle("is-scrolled", window.scrollY > 12);
+    return;
+  }
 
-  let ticking = false;
+  const observer = new IntersectionObserver(
+    function (entries) {
+      const entry = entries[0];
+      nav.classList.toggle("is-scrolled", !entry.isIntersecting);
+    },
+    { root: null, threshold: 0 }
+  );
+
+  observer.observe(sentinel);
+
+})();
+
+
+/*
+  Luxury chrome: preloader exit plus scroll progress
+  driven by a single rAF loop on transform only.
+*/
+
+(function initLuxuryChrome() {
+
+  document.body.classList.add("lux-loading");
+
+  const preloader = document.getElementById("luxPreloader");
+  const bar = document.getElementById("luxProgressBar");
+
+  const hidePreloader = function () {
+    document.body.classList.remove("lux-loading");
+    if (preloader) preloader.classList.add("is-done");
+  };
+
+  if (document.readyState === "complete") {
+    window.setTimeout(hidePreloader, 350);
+  } else {
+    window.addEventListener("load", function () {
+      window.setTimeout(hidePreloader, 350);
+    }, { once: true });
+    window.setTimeout(hidePreloader, 2600);
+  }
+
+  if (!bar || prefersReducedMotion.matches) {
+    if (bar) bar.style.transform = "scaleX(0)";
+    return;
+  }
+
+  let queued = false;
 
   const update = function () {
+    queued = false;
+    const max = document.documentElement.scrollHeight - window.innerHeight;
+    const progress = max > 0 ? Math.min(Math.max(window.scrollY / max, 0), 1) : 0;
+    bar.style.transform = "scaleX(" + progress.toFixed(4) + ")";
+  };
 
-    nav.classList.toggle("is-scrolled", window.scrollY > 12);
-    ticking = false;
-
+  const loop = function () {
+    if (!queued) {
+      queued = true;
+      window.requestAnimationFrame(update);
+    }
+    window.setTimeout(loop, 120);
   };
 
   update();
-
-  window.addEventListener(
-    "scroll",
-    function () {
-
-      if (ticking) return;
-
-      ticking = true;
-      window.requestAnimationFrame(update);
-
-    },
-    { passive: true }
-  );
+  loop();
 
 })();
 
@@ -351,25 +333,40 @@ if (contactForm) {
     const message =
       document.getElementById("message").value.trim();
 
-    const receiver =
-      "Mr.HarshithQ7@gmail.com";
+    if (sendButton) sendButton.disabled = true;
+    if (sendLabel) sendLabel.textContent = "Sending…";
 
-    const mailSubject =
-      encodeURIComponent(subject);
+    const releaseButton = function () {
+      if (sendButton) sendButton.disabled = false;
+    };
 
-    const mailBody =
-      encodeURIComponent(
-        `Name: ${name}\n` +
-        `Email: ${email}\n\n` +
-        `${message}`
-      );
+    if (!window.fetch) {
+      flagSendError();
+      releaseButton();
+      return;
+    }
 
-    window.location.href =
-      `mailto:${receiver}?subject=${mailSubject}&body=${mailBody}`;
-
-    formSuccess.classList.add("show");
-
-    confirmSend();
+    window.fetch("https://formspree.io/f/mzezajwp", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Accept": "application/json"
+      },
+      body: JSON.stringify({
+        name: name,
+        email: email,
+        subject: subject,
+        message: message
+      })
+    }).then(function (response) {
+      if (!response.ok) throw new Error("send failed");
+      formSuccess.classList.add("show");
+      confirmSend();
+    }).catch(function () {
+      flagSendError();
+    }).then(function () {
+      releaseButton();
+    });
 
   });
 
@@ -396,11 +393,28 @@ function confirmSend() {
   window.clearTimeout(sendResetTimer);
 
   sendButton.classList.add("is-sent");
-  sendLabel.textContent = "Opening your mail app…";
+  sendLabel.textContent = "Message sent";
 
   sendResetTimer = window.setTimeout(function () {
 
     sendButton.classList.remove("is-sent");
+    sendLabel.textContent = "Send Message";
+
+  }, 2600);
+
+}
+
+
+function flagSendError() {
+
+  if (!sendButton || !sendLabel) return;
+
+  window.clearTimeout(sendResetTimer);
+
+  sendLabel.textContent = "Couldn't send. Try again.";
+
+  sendResetTimer = window.setTimeout(function () {
+
     sendLabel.textContent = "Send Message";
 
   }, 2600);
@@ -449,140 +463,6 @@ function confirmSend() {
 
 
 /*
-  Apple Design: Ultra-Smooth Lerped Card 3D Tilt & Spotlight Shimmer
-*/
-
-(function initAppleCardPhysics() {
-  if (prefersReducedMotion.matches) return;
-
-  const cards = document.querySelectorAll(
-    ".project-card, .built-card, .tech-card"
-  );
-
-  cards.forEach(function (card) {
-    let currentTiltX = 0, currentTiltY = 0;
-    let targetTiltX = 0, targetTiltY = 0;
-    let currentMouseX = 0, currentMouseY = 0;
-    let targetMouseX = 0, targetMouseY = 0;
-    let isHovered = false;
-    let animFrame = null;
-
-    function render() {
-      // Lerp smoothing factor for physical spring momentum feel
-      currentTiltX += (targetTiltX - currentTiltX) * 0.1;
-      currentTiltY += (targetTiltY - currentTiltY) * 0.1;
-      currentMouseX += (targetMouseX - currentMouseX) * 0.14;
-      currentMouseY += (targetMouseY - currentMouseY) * 0.14;
-
-      card.style.setProperty("--mouse-x", currentMouseX.toFixed(1) + "px");
-      card.style.setProperty("--mouse-y", currentMouseY.toFixed(1) + "px");
-      card.style.setProperty("--tilt-x", currentTiltX.toFixed(2) + "deg");
-      card.style.setProperty("--tilt-y", currentTiltY.toFixed(2) + "deg");
-
-      if (isHovered || Math.abs(targetTiltX - currentTiltX) > 0.01 || Math.abs(targetTiltY - currentTiltY) > 0.01) {
-        animFrame = requestAnimationFrame(render);
-      } else {
-        card.style.setProperty("--tilt-x", "0deg");
-        card.style.setProperty("--tilt-y", "0deg");
-      }
-    }
-
-    card.addEventListener("mousemove", function (e) {
-      const rect = card.getBoundingClientRect();
-      targetMouseX = e.clientX - rect.left;
-      targetMouseY = e.clientY - rect.top;
-
-      const centerX = rect.width / 2;
-      const centerY = rect.height / 2;
-
-      targetTiltX = ((targetMouseY - centerY) / centerY) * -5.5;
-      targetTiltY = ((targetMouseX - centerX) / centerX) * 5.5;
-
-      if (!isHovered) {
-        isHovered = true;
-        cancelAnimationFrame(animFrame);
-        animFrame = requestAnimationFrame(render);
-      }
-    });
-
-    card.addEventListener("mouseleave", function () {
-      isHovered = false;
-      targetTiltX = 0;
-      targetTiltY = 0;
-    });
-  });
-})();
-
-
-/*
-  Apple Design: Buttery Smooth Hero Portrait Parallax Loop
-*/
-
-(function initHeroPortraitParallax() {
-  if (prefersReducedMotion.matches) return;
-
-  const heroSection = document.querySelector(".hero-section");
-  const heroPersonImg = document.querySelector(".hero-person img");
-  const heroPerson = document.querySelector(".hero-person");
-
-  if (!heroSection || !heroPersonImg) return;
-
-  let currentTiltX = 0, currentTiltY = 0, currentTransX = 0, currentTransY = 0;
-  let targetTiltX = 0, targetTiltY = 0, targetTransX = 0, targetTransY = 0;
-  let isHovered = false;
-  let animFrame = null;
-
-  function render() {
-    // Ultra smooth lerping factor (0.07) for silky weightless momentum
-    currentTiltX += (targetTiltX - currentTiltX) * 0.07;
-    currentTiltY += (targetTiltY - currentTiltY) * 0.07;
-    currentTransX += (targetTransX - currentTransX) * 0.07;
-    currentTransY += (targetTransY - currentTransY) * 0.07;
-
-    heroPersonImg.style.transform = `perspective(1000px) rotateX(${currentTiltX.toFixed(2)}deg) rotateY(${currentTiltY.toFixed(2)}deg) translate3d(${currentTransX.toFixed(1)}px, ${currentTransY.toFixed(1)}px, 0px)`;
-
-    if (heroPerson) {
-      heroPerson.style.transform = `translateX(-50%) translate3d(${(currentTransX * 0.35).toFixed(1)}px, ${(currentTransY * 0.35).toFixed(1)}px, 0px)`;
-    }
-
-    if (isHovered || Math.abs(targetTiltX - currentTiltX) > 0.01 || Math.abs(targetTiltY - currentTiltY) > 0.01) {
-      animFrame = requestAnimationFrame(render);
-    } else {
-      heroPersonImg.style.transform = "perspective(1000px) rotateX(0deg) rotateY(0deg) translate3d(0, 0, 0)";
-      if (heroPerson) {
-        heroPerson.style.transform = "translateX(-50%) translate3d(0, 0, 0)";
-      }
-    }
-  }
-
-  heroSection.addEventListener("mousemove", function (e) {
-    const rect = heroSection.getBoundingClientRect();
-    const relativeX = (e.clientX - rect.left) / rect.width - 0.5;
-    const relativeY = (e.clientY - rect.top) / rect.height - 0.5;
-
-    targetTiltX = relativeY * -7;
-    targetTiltY = relativeX * 9;
-    targetTransX = relativeX * 10;
-    targetTransY = relativeY * 7;
-
-    if (!isHovered) {
-      isHovered = true;
-      cancelAnimationFrame(animFrame);
-      animFrame = requestAnimationFrame(render);
-    }
-  });
-
-  heroSection.addEventListener("mouseleave", function () {
-    isHovered = false;
-    targetTiltX = 0;
-    targetTiltY = 0;
-    targetTransX = 0;
-    targetTransY = 0;
-  });
-})();
-
-
-/*
   Apple Design: Smooth Inertia Scroll Interpolation
 */
 
@@ -603,13 +483,13 @@ function confirmSend() {
       const targetPosition = targetEl.getBoundingClientRect().top + window.scrollY - 54;
       const startPosition = window.scrollY;
       const distance = targetPosition - startPosition;
-      const duration = 750; // ms
+      const duration = 1200; // ms, calm medium-slow pace
       let startTime = null;
 
       function easeInOutApple(t) {
         return t < 0.5
-          ? 4 * t * t * t
-          : 1 - Math.pow(-2 * t + 2, 3) / 2;
+          ? 8 * t * t * t * t
+          : 1 - Math.pow(-2 * t + 2, 4) / 2;
       }
 
       function step(timestamp) {

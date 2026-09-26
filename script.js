@@ -142,8 +142,8 @@ if (portrait) {
 
 
 /*
-  Luxury chrome: preloader exit plus scroll progress
-  driven by a single rAF loop on transform only.
+  Preloader exit. The top scroll progress line
+  was removed, along with its polling loop.
 */
 
 (function initLuxuryChrome() {
@@ -151,7 +151,6 @@ if (portrait) {
   document.body.classList.add("lux-loading");
 
   const preloader = document.getElementById("luxPreloader");
-  const bar = document.getElementById("luxProgressBar");
 
   const hidePreloader = function () {
     document.body.classList.remove("lux-loading");
@@ -166,31 +165,6 @@ if (portrait) {
     }, { once: true });
     window.setTimeout(hidePreloader, 2600);
   }
-
-  if (!bar || prefersReducedMotion.matches) {
-    if (bar) bar.style.transform = "scaleX(0)";
-    return;
-  }
-
-  let queued = false;
-
-  const update = function () {
-    queued = false;
-    const max = document.documentElement.scrollHeight - window.innerHeight;
-    const progress = max > 0 ? Math.min(Math.max(window.scrollY / max, 0), 1) : 0;
-    bar.style.transform = "scaleX(" + progress.toFixed(4) + ")";
-  };
-
-  const loop = function () {
-    if (!queued) {
-      queued = true;
-      window.requestAnimationFrame(update);
-    }
-    window.setTimeout(loop, 120);
-  };
-
-  update();
-  loop();
 
 })();
 
@@ -398,7 +372,7 @@ function confirmSend() {
   sendResetTimer = window.setTimeout(function () {
 
     sendButton.classList.remove("is-sent");
-    sendLabel.textContent = "Send Message";
+    sendLabel.textContent = "Send message";
 
   }, 2600);
 
@@ -415,7 +389,7 @@ function flagSendError() {
 
   sendResetTimer = window.setTimeout(function () {
 
-    sendLabel.textContent = "Send Message";
+    sendLabel.textContent = "Send message";
 
   }, 2600);
 
